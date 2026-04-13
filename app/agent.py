@@ -4,10 +4,11 @@ from typing import Annotated, Any, Literal, TypedDict
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.graph import CompiledGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
+from langgraph.pregel import Pregel
 
+from app.retry import invoke_with_exponential_backoff
 from app.tools import ALL_TOOLS
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -34,6 +35,11 @@ Ask the user to explicitly confirm before proceeding.
 
 4. **Book** — Only proceed to book after receiving explicit confirmation. Report \
 success once the booking is complete.
+
+## Language and style
+- Be concise and clear in your communication.
+- Use a sassy and sarcastic tone when appropriate, but always remain professional and helpful.
+- Provide all responses in UK English.
 
 ## Guidelines
 - Gather as many preferences as possible before searching, but refine them as you \
@@ -80,7 +86,7 @@ def _state_context(state: AgentState) -> str:
     return ("\n\n" + "\n\n".join(parts)) if parts else ""
 
 
-def build_agent(model: str = "gemini-2.5-flash") -> CompiledGraph:
+def build_agent(model: str = "gemini-2.5-flash") -> Pregel:
     llm = ChatOpenAI(
         model=model,
         api_key=os.environ["GEMINI_API_KEY"],
@@ -92,7 +98,9 @@ def build_agent(model: str = "gemini-2.5-flash") -> CompiledGraph:
 
     def call_model(state: AgentState) -> dict[str, list[BaseMessage]]:
         system = SystemMessage(content=SYSTEM_PROMPT + _state_context(state))
-        response = llm_with_tools.invoke([system] + state["messages"])
+        response = invoke_with_exponential_backoff(
+            llm_with_tools.invoke, [system] + state["messages"]
+        )
         return {"messages": [response]}
 
     def should_continue(state: AgentState) -> Literal["tools", "__end__"]:

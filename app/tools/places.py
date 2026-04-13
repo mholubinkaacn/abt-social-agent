@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -31,7 +32,10 @@ def search_places(query: str, max_results: int = 5) -> str:
         query: Free-text search string (e.g. "coffee shops in Austin TX").
         max_results: Maximum number of results to return (1-20, default 5).
     """
-    field_mask = "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount"
+    field_mask = (
+        "places.id,places.displayName,places.formattedAddress,"
+        "places.rating,places.userRatingCount"
+    )
     payload = {
         "textQuery": query,
         "pageSize": min(max(1, max_results), 20),
@@ -57,7 +61,8 @@ def search_places(query: str, max_results: int = 5) -> str:
         count = p.get("userRatingCount", 0)
         place_id = p.get("id", "N/A")
         lines.append(
-            f"- {name} | {address} | Rating: {rating} ({count} reviews) | ID: {place_id}"
+            f"- {name} | {address} | Rating: {rating} ({count} reviews)"
+            f" | ID: {place_id}"
         )
 
     return "\n".join(lines)
@@ -105,6 +110,81 @@ def get_place_details(place_id: str) -> str:
     return "\n".join(lines)
 
 
+# Google Places API day-of-week: 0 = Sunday, 1 = Monday ... 6 = Saturday
+# Python weekday():               0 = Monday ... 6 = Sunday
+_PYTHON_TO_PLACES_DOW = [1, 2, 3, 4, 5, 6, 0]  # index by python weekday
+
+
+@tool
+def check_place_hours(place_id: str, datetime_str: str) -> str:
+    """Check whether a place is open at a specific date and time, and report
+    the next opening time if it is currently closed.
+
+    Args:
+        place_id: The Google Place ID.
+        datetime_str: ISO 8601 datetime to check (e.g. "2026-04-13T18:00:00").
+    """
+    field_mask = "regularOpeningHours"
+    resp = requests.get(
+        f"{PLACES_API_BASE}/{place_id}",
+        headers=_headers(field_mask),
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    periods = data.get("regularOpeningHours", {}).get("periods", [])
+    if not periods:
+        return "Opening hours not available for this venue."
+
+    dt = datetime.fromisoformat(datetime_str)
+    check_dow = _PYTHON_TO_PLACES_DOW[dt.weekday()]
+    check_minutes = dt.hour * 60 + dt.minute
+
+    # Check if open at the requested time
+    for period in periods:
+        open_info = period.get("open", {})
+        close_info = period.get("close", {})
+        if open_info.get("day") == check_dow:
+            open_min = open_info["hour"] * 60 + open_info.get("minute", 0)
+            close_min = close_info["hour"] * 60 + close_info.get("minute", 0)
+            if open_min <= check_minutes < close_min:
+                close_h = close_info["hour"]
+                close_m = close_info.get("minute", 0)
+                return f"Open — closing at {close_h:02d}:{close_m:02d}."
+
+    # Closed — find next opening time
+    _DAY_NAMES = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ]
+    # Search up to 7 days ahead
+    for days_ahead in range(7):
+        future_dow = (check_dow + days_ahead) % 7
+        for period in sorted(
+            periods, key=lambda p: p["open"]["hour"] * 60 + p["open"].get("minute", 0)
+        ):
+            open_info = period.get("open", {})
+            if open_info.get("day") != future_dow:
+                continue
+            open_min = open_info["hour"] * 60 + open_info.get("minute", 0)
+            # Same day: only future times count
+            if days_ahead == 0 and open_min <= check_minutes:
+                continue
+            label = "today" if days_ahead == 0 else _DAY_NAMES[future_dow]
+            return (
+                f"Closed — next opening: {label} at "
+                f"{open_info['hour']:02d}:{open_info.get('minute', 0):02d}."
+            )
+
+    return "Closed — no upcoming opening times found."
+
+
 @tool
 def find_nearby_places(
     latitude: float,
@@ -121,7 +201,10 @@ def find_nearby_places(
         place_type: Optional place type filter (e.g. "restaurant", "cafe",
                     "bar", "lodging"). Leave empty to return all types.
     """
-    field_mask = "places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount"
+    field_mask = (
+        "places.id,places.displayName,places.formattedAddress,"
+        "places.rating,places.userRatingCount"
+    )
     payload: dict[str, Any] = {
         "locationRestriction": {
             "circle": {
@@ -155,7 +238,8 @@ def find_nearby_places(
         count = p.get("userRatingCount", 0)
         place_id = p.get("id", "N/A")
         lines.append(
-            f"- {name} | {address} | Rating: {rating} ({count} reviews) | ID: {place_id}"
+            f"- {name} | {address} | Rating: {rating} ({count} reviews)"
+            f" | ID: {place_id}"
         )
 
     return "\n".join(lines)

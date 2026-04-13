@@ -26,7 +26,7 @@ def run_query(query: str, model: str) -> None:
         }
     )
     final_message = result["messages"][-1].content
-    print(f"Agent: {final_message}\n")
+    print(f"Withnail: {final_message}\n")
 
 
 def run_interactive(model: str) -> None:
@@ -34,10 +34,29 @@ def run_interactive(model: str) -> None:
 
     from app.agent import build_agent
 
-    print("abt-social-agent (Google Places)")
     print("Type 'quit' or 'exit' to stop.\n")
 
     agent = build_agent(model=model)
+
+    # Trigger the agent for an opening greeting before the user types anything.
+    # Must be a HumanMessage so the Gemini API receives valid contents.
+    intro_state: dict = {
+        "messages": [
+            HumanMessage(
+                content=(
+                    "Introduce yourself: state your name (Withnail), your role "
+                    "(helping find and book a venue for the ABT team social), "
+                    "and what you will help with today."
+                )
+            )
+        ],
+        "preferences": {},
+        "confirmed_place_id": None,
+        "booked": False,
+    }
+    intro_result = agent.invoke(intro_state)
+    print(f"Withnail: {intro_result['messages'][-1].content}\n")
+
     state: dict = {
         "messages": [],
         "preferences": {},
@@ -61,7 +80,7 @@ def run_interactive(model: str) -> None:
         state["messages"] = state["messages"] + [HumanMessage(content=user_input)]
         state = agent.invoke(state)
         reply = state["messages"][-1].content
-        print(f"\nAgent: {reply}\n")
+        print(f"\nWithnail: {reply}\n")
 
         if state.get("booked"):
             print("Booking complete. Goodbye!")

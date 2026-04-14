@@ -20,10 +20,6 @@ target-version = ["py311"]
 line-length = 88
 
 [tool.ruff]
-line-length = 88
-
-[tool.ruff.lint]
-select = ["E501"]
 
 [tool.poetry]
 package-mode = false

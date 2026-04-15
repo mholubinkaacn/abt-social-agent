@@ -13,6 +13,7 @@ from app.retry import invoke_with_exponential_backoff
 from app.tools import ALL_TOOLS
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+NODE_TOOLS: Literal["tools"] = "tools"
 
 
 class AgentState(TypedDict):
@@ -71,14 +72,14 @@ def build_agent(model: str = "gemini-2.5-flash") -> Pregel:
             return END
         last = state["messages"][-1]
         if isinstance(last, AIMessage) and last.tool_calls:
-            return "tools"
+            return NODE_TOOLS
         return END
 
     graph = StateGraph(AgentState)
     graph.add_node("agent", call_model)
-    graph.add_node("tools", tool_node)
+    graph.add_node(NODE_TOOLS, tool_node)
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", should_continue)
-    graph.add_edge("tools", "agent")
+    graph.add_edge(NODE_TOOLS, "agent")
 
     return graph.compile()

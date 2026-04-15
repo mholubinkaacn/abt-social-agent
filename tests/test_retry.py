@@ -96,14 +96,15 @@ def test_each_retry_waits_twice_as_long_as_the_previous() -> None:
     """
     Given the model returns 503 errors three times then succeeds
     When the model is invoked with base_delay=1s
-    Then waits are 1s, 2s, 4s between retries
+    Then base waits double each retry: 1s, 2s, 4s (jitter excluded)
     """
     model = MagicMock(
         side_effect=[_503_error(), _503_error(), _503_error(), "response"]
     )
 
     with patch("app.retry.time.sleep") as mock_sleep:
-        invoke_with_exponential_backoff(model, max_retries=3, base_delay=1.0)
+        with patch("app.retry.random.uniform", return_value=0.0):
+            invoke_with_exponential_backoff(model, max_retries=3, base_delay=1.0)
 
     actual_delays = [call.args[0] for call in mock_sleep.call_args_list]
     assert actual_delays == [1.0, 2.0, 4.0]
@@ -118,7 +119,7 @@ def test_retry_delay_never_exceeds_configured_maximum() -> None:
     """
     Given the model returns 503 errors with many retries configured
     When max_delay is set to 30s
-    Then no individual wait exceeds 30s
+    Then no individual wait exceeds 30s (including jitter)
     """
     # base_delay=10s → uncapped delays would be 10, 20, 40, 80; capped at 30
     model = MagicMock(
@@ -126,9 +127,10 @@ def test_retry_delay_never_exceeds_configured_maximum() -> None:
     )
 
     with patch("app.retry.time.sleep") as mock_sleep:
-        invoke_with_exponential_backoff(
-            model, max_retries=4, base_delay=10.0, max_delay=30.0
-        )
+        with patch("app.retry.random.uniform", return_value=0.0):
+            invoke_with_exponential_backoff(
+                model, max_retries=4, base_delay=10.0, max_delay=30.0
+            )
 
     actual_delays = [call.args[0] for call in mock_sleep.call_args_list]
     assert actual_delays == [10.0, 20.0, 30.0, 30.0]

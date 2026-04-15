@@ -1,6 +1,7 @@
 """Retry utilities for model calls that fail due to transient high-demand errors."""
 
 import logging
+import random
 import time
 from typing import Any, Callable
 
@@ -33,7 +34,7 @@ def invoke_with_exponential_backoff(
         except openai.InternalServerError as exc:
             if exc.status_code != 503 or attempt >= max_retries:
                 raise
-            delay = min(base_delay * (2**attempt), max_delay)
+            delay = min(base_delay * (2**attempt), max_delay) + random.uniform(0, 1)
             logger.warning(
                 "Model overloaded (503) — retrying in %.1fs (attempt %d/%d)",
                 delay,

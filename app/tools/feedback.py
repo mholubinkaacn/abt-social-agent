@@ -3,8 +3,7 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
-_EXECUTION_TIME = datetime.now().strftime("%Y%m%dT%H%M%S")
-LOG_PATH = Path(f"feedback-{_EXECUTION_TIME}.log")
+LOG_PATH = Path(f"feedback-{datetime.now().strftime('%Y%m%dT%H%M%S')}.log")
 
 
 @tool

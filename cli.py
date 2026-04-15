@@ -9,25 +9,30 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Maximum number of consecutive declined/failed turns before the session restarts.
 MAX_RETRIES = 2
-
-# Sentinel tokens the LLM appends to signal session events.
 _SENTINEL_DECLINED = "[SESSION:DECLINED]"
 _SENTINEL_FAILED = "[SESSION:FAILED]"
 
 
 def _strip_sentinel(reply: str) -> tuple[str, str | None]:
-    """
-    Remove any trailing sentinel token from *reply*.
+    """Remove any trailing sentinel token from *reply*.
 
     Returns (clean_reply, sentinel_or_None).
     """
+    stripped = reply.rstrip()
     for sentinel in (_SENTINEL_DECLINED, _SENTINEL_FAILED):
-        if reply.rstrip().endswith(sentinel):
-            clean = reply.rstrip()[: -len(sentinel)].rstrip()
-            return clean, sentinel
+        if stripped.endswith(sentinel):
+            return stripped[: -len(sentinel)].rstrip(), sentinel
     return reply, None
+
+
+def _initial_state(messages: list | None = None) -> dict:
+    return {
+        "messages": messages or [],
+        "preferences": {},
+        "confirmed_place_id": None,
+        "booked": False,
+    }
 
 
 def run_query(query: str, model: str) -> None:
@@ -39,43 +44,32 @@ def run_query(query: str, model: str) -> None:
     print(f"\nQuery: {query}\n")
     print("-" * 60)
 
-    result = agent.invoke(
-        {
-            "messages": [HumanMessage(content=query)],
-            "preferences": {},
-            "confirmed_place_id": None,
-            "booked": False,
-        }
-    )
-    final_message = result["messages"][-1].content
-    print(f"Withnail: {final_message}\n")
+    result = agent.invoke(_initial_state([HumanMessage(content=query)]))
+    print(f"Withnail: {result['messages'][-1].content}\n")
 
 
 def _run_intro(agent: Any) -> None:
     """Invoke the agent for the opening greeting and print it."""
     from langchain_core.messages import HumanMessage
 
-    intro_state: dict = {
-        "messages": [
-            HumanMessage(
-                content=(
-                    "Introduce yourself: state your name (Withnail), your role "
-                    "(helping find and book a venue for the ABT team social), "
-                    "and what you will help with today."
+    result = agent.invoke(
+        _initial_state(
+            [
+                HumanMessage(
+                    content=(
+                        "Introduce yourself: state your name (Withnail), your role "
+                        "(helping find and book a venue for the ABT team social), "
+                        "and what you will help with today."
+                    )
                 )
-            )
-        ],
-        "preferences": {},
-        "confirmed_place_id": None,
-        "booked": False,
-    }
-    intro_result = agent.invoke(intro_state)
-    print(f"Withnail: {intro_result['messages'][-1].content}\n")
+            ]
+        )
+    )
+    print(f"Withnail: {result['messages'][-1].content}\n")
 
 
 def _run_single_session(model: str) -> bool:
-    """
-    Run one interactive session.
+    """Run one interactive session.
 
     Returns True if the session should restart (retry limit hit),
     raises SystemExit(0) on successful booking completion.
@@ -89,13 +83,7 @@ def _run_single_session(model: str) -> bool:
     agent = build_agent(model=model)
     _run_intro(agent)
 
-    state: dict = {
-        "messages": [],
-        "preferences": {},
-        "confirmed_place_id": None,
-        "booked": False,
-    }
-
+    state: dict = _initial_state()
     consecutive_failures = 0
 
     while True:
@@ -103,44 +91,38 @@ def _run_single_session(model: str) -> bool:
             user_input = input("You: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nGoodbye.")
-            return False  # clean exit, no restart
+            return False
 
         if not user_input:
             continue
         if user_input.lower() in ("quit", "exit"):
             print("Goodbye.")
-            return False  # clean exit, no restart
+            return False
 
         state["messages"] = state["messages"] + [HumanMessage(content=user_input)]
         state = agent.invoke(state)
 
         raw_reply = state["messages"][-1].content
         clean_reply, sentinel = _strip_sentinel(raw_reply)
-
-        # Update stored reply so future context doesn't include the sentinel.
         state["messages"][-1].content = clean_reply
 
+        print(f"\nWithnail: {clean_reply}\n")
+
         if state.get("booked"):
-            print(f"\nWithnail: {clean_reply}\n")
             print("Booking complete. Goodbye!")
             sys.exit(0)
 
         if sentinel:
             consecutive_failures += 1
-            print(f"\nWithnail: {clean_reply}\n")
-
             if consecutive_failures >= MAX_RETRIES:
-                # Retry limit reached — explain and restart.
                 print(
                     "\n[Withnail is ending this session — he has been unable to assist "
                     "with your last several requests. Starting a fresh session...]\n"
                 )
                 print("-" * 60)
-                return True  # signal restart
+                return True
         else:
-            # Successful response — reset the failure counter.
             consecutive_failures = 0
-            print(f"\nWithnail: {clean_reply}\n")
 
 
 def run_interactive(model: str) -> None:

@@ -4,6 +4,88 @@ Features are ordered by priority. Dependencies are noted where they exist.
 
 ---
 
+## 0. Structured Session Logging
+
+*High priority — required foundation for feedback evals (feature 5) and any
+future performance analysis.*
+
+Capture a structured log for every session: the full conversation and all tool
+calls with inputs and outputs (reasoning trace), written to `logs/` daily.
+
+Feedback entries are written separately to `feedback/` so they can be tracked
+and queried independently. Both files share a session ID and timestamp so they
+can be correlated at analysis time.
+
+**File layout**
+
+```
+logs/YYYY-MM-DD_<session_id>.json      — conversation + reasoning trace
+feedback/YYYY-MM-DD_<session_id>.jsonl — one feedback entry per line
+```
+
+**Session log schema** (`logs/`)
+
+```json
+{
+  "session_id": "uuid4",
+  "date": "YYYY-MM-DD",
+  "started_at": "ISO8601",
+  "ended_at": "ISO8601",
+  "outcome": "booked | declined | failed | abandoned",
+  "turns": [
+    {
+      "turn": 1,
+      "user": "what's the vibe like at Vagabond?",
+      "reasoning": [
+        {"tool": "get_place_details", "input": {...}, "output": "..."}
+      ],
+      "reply": "One imagines it to be rather convivial...",
+      "sentinel": null
+    }
+  ]
+}
+```
+
+**Feedback log schema** (`feedback/`)
+
+```jsonl
+{"session_id": "uuid4", "timestamp": "ISO8601", "turn": 1, "message": "User asked for vibe — no atmospheric data available."}
+{"session_id": "uuid4", "timestamp": "ISO8601", "turn": 3, "message": "User asked for walking time — no distance tool available."}
+```
+
+**Depends on:** none — should be implemented before feature 5.
+
+**Scenarios**
+
+```
+Given a session starts
+When the user sends the first message
+Then a new session log file is created in logs/ with today's date and a session ID
+
+Given the agent calls a tool during a turn
+When the turn completes
+Then the tool name, input, and output are recorded in that turn's reasoning trace
+
+Given the agent calls leave_feedback during a turn
+When leave_feedback is called
+Then a new line is appended to feedback/YYYY-MM-DD_<session_id>.jsonl
+  with the session ID, timestamp, turn number, and message
+
+Given a session ends (booked, declined, failed, or abandoned)
+When the process exits or restarts
+Then the session log is closed with an outcome and ended_at timestamp
+
+Given multiple sessions run on the same day
+When logs are written
+Then each session produces separate files in logs/ and feedback/ with a shared unique session ID
+
+Given a session log and feedback file share a session ID
+When correlated by session ID and turn number
+Then every feedback entry can be matched to the exact turn in the conversation log
+```
+
+---
+
 ## 1. Weather Tool
 
 Fetch tonight's forecast so Withnail can factor conditions into venue recommendations
@@ -135,4 +217,50 @@ Then it calls get_current_location as normal
 Given --location is provided with an unrecognisable string
 When the agent attempts to search
 Then it reports the issue to the user and falls back to get_current_location
+```
+
+---
+
+## 5. Feedback Evals
+
+*Motivation: the agent silently failed to call `leave_feedback` when it couldn't
+answer a question about venue pricing — a capability gap went unrecorded.
+Evals ensure the feedback instruction is followed consistently.*
+
+A suite of offline evaluations that replay known capability-gap scenarios and
+assert `leave_feedback` was called with a relevant message.
+Evals run against a stubbed agent (no live API calls) using recorded prompts
+drawn from real log entries and synthetic gap cases.
+
+**Depends on:** existing `leave_feedback` tool and feedback log mechanism.
+
+**Eval cases to cover**
+
+| Trigger | Expected behaviour |
+|---|---|
+| User asks for venue pricing | `leave_feedback` called immediately |
+| User asks for walking distance/time | `leave_feedback` called immediately |
+| User asks for venue "vibe" with no reviews available | `leave_feedback` called immediately |
+| Tool raises an unrecoverable error | `leave_feedback` called before responding |
+| User asks an out-of-scope question | `leave_feedback` NOT called (declined, not a gap) |
+| Agent successfully answers a question | `leave_feedback` NOT called |
+
+**Scenarios**
+
+```
+Given a capability gap is encountered on the first turn
+When the agent responds
+Then leave_feedback is called in the same turn before the user reply
+
+Given the agent cannot answer a question about a suggested venue
+When the agent responds
+Then leave_feedback is called with a description of what was asked and what was missing
+
+Given the user asks an out-of-scope question
+When the agent declines
+Then leave_feedback is not called
+
+Given the agent successfully completes a request
+When the agent responds
+Then leave_feedback is not called
 ```

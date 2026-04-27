@@ -7,6 +7,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from langgraph.pregel import Pregel
+from pydantic import SecretStr
 
 from app.prompt import SYSTEM_PROMPT
 from app.retry import invoke_with_exponential_backoff
@@ -53,7 +54,7 @@ def _state_context(state: AgentState) -> str:
 def build_agent(model: str = "gemini-2.5-flash") -> Pregel:
     llm = ChatOpenAI(
         model=model,
-        api_key=os.environ["GEMINI_API_KEY"],
+        api_key=SecretStr(os.environ["GEMINI_API_KEY"]),
         base_url=GEMINI_BASE_URL,
         temperature=0,
     )
@@ -69,11 +70,11 @@ def build_agent(model: str = "gemini-2.5-flash") -> Pregel:
 
     def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
         if state.get("booked"):
-            return END
+            return END  # type: ignore[return-value]
         last = state["messages"][-1]
         if isinstance(last, AIMessage) and last.tool_calls:
             return NODE_TOOLS
-        return END
+        return END  # type: ignore[return-value]
 
     graph = StateGraph(AgentState)
     graph.add_node("agent", call_model)

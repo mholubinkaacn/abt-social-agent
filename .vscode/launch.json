@@ -12,6 +12,16 @@
       "justMyCode": false
     },
     {
+      "name": "Streamlit: UI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "streamlit",
+      "args": ["run", "${workspaceFolder}/streamlit_app.py"],
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": false
+    },
+    {
       "name": "CLI: Single Query",
       "type": "debugpy",
       "request": "launch",

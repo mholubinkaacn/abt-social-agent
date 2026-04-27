@@ -8,9 +8,14 @@ def get_current_location() -> str:
     based on its public IP address. Returns city, region, country, and
     latitude/longitude coordinates.
     """
-    resp = requests.get("https://ipapi.co/json/", timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
+    try:
+        resp = requests.get("https://ipapi.co/json/", timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.HTTPError as exc:
+        return f"Location lookup failed: {exc}. Ask the user for their location."
+    except requests.RequestException as exc:
+        return f"Location lookup failed: {exc}. Ask the user for their location."
 
     return (
         f"City: {data.get('city', 'N/A')}\n"

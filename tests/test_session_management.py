@@ -6,6 +6,7 @@ Tests exercise run_session() and run_interactive() through their public interfac
 the agent LLM is replaced with a fake that returns controlled responses.
 """
 
+from collections.abc import Iterator
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
@@ -19,9 +20,25 @@ MAX_RETRIES = 2  # must match cli.MAX_RETRIES
 
 
 def _fake_agent(responses: list[dict]) -> MagicMock:
-    """Build a mock agent whose invoke() returns each dict in sequence."""
+    """Build a mock agent that returns responses in sequence.
+
+    invoke() is used for the intro greeting (one call per session start).
+    stream() is used for every user turn (yields a single final-state chunk).
+
+    responses[0] is the first intro, responses[-1] is the last intro on restart.
+    Pass responses in the order they will be consumed: intro, turns..., intro2, turns...
+    The helper separates intro calls (invoke) from turn calls (stream) by
+    consuming them in the order they are called.
+    """
     agent = MagicMock()
-    agent.invoke.side_effect = responses
+    _responses = iter(responses)
+
+    agent.invoke.side_effect = lambda *a, **kw: next(_responses)
+
+    def _stream(state: dict, **kwargs: object) -> Iterator[dict]:
+        return iter([next(_responses)])
+
+    agent.stream.side_effect = _stream
     return agent
 
 
@@ -263,15 +280,21 @@ def test_restarted_session_begins_with_fresh_state_and_intro_greeting() -> None:
     s1_d3 = _reply("No.\n[SESSION:DECLINED]")
     s2_intro = _reply("Hello, session two.")
 
-    captured_states: list[dict] = []
+    captured_states: list[tuple[str, dict]] = []
+    turn_responses = iter([s1_d1, s1_d2, s1_d3])
+    intro_responses = iter([s1_intro, s2_intro])
 
     def capturing_invoke(state: dict) -> dict:
-        captured_states.append(state)
-        responses = [s1_intro, s1_d1, s1_d2, s1_d3, s2_intro]
-        return responses[len(captured_states) - 1]
+        captured_states.append(("invoke", state))
+        return next(intro_responses)
+
+    def capturing_stream(state: dict, **kwargs: object) -> Iterator[dict]:
+        captured_states.append(("stream", state))
+        return iter([next(turn_responses)])
 
     fake = MagicMock()
     fake.invoke.side_effect = capturing_invoke
+    fake.stream.side_effect = capturing_stream
 
     with patch("app.agent.build_agent", side_effect=[fake, fake]):
         with patch(
@@ -281,9 +304,10 @@ def test_restarted_session_begins_with_fresh_state_and_intro_greeting() -> None:
             with patch("sys.stdout", new_callable=StringIO):
                 run_interactive(model="test-model")
 
-    # The 5th invoke is the session-2 intro — its state must have empty messages
-    assert len(captured_states) >= 5
-    s2_intro_state = captured_states[4]
+    # The second invoke call is the session-2 intro — its state must have empty messages
+    invoke_calls = [s for kind, s in captured_states if kind == "invoke"]
+    assert len(invoke_calls) >= 2
+    s2_intro_state = invoke_calls[1]
     assert s2_intro_state["booked"] is False
     assert s2_intro_state["preferences"] == {}
     assert s2_intro_state["confirmed_place_id"] is None
